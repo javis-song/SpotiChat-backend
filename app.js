@@ -1,4 +1,4 @@
-const PORT = 3000;
+const PORT = 8000;
 const INDEX = '/index.html';
 
 const express = require('express');
@@ -8,93 +8,62 @@ const server = express()
   .use((req, res) => res.sendFile(INDEX, { root: __dirname }))
   .listen(PORT, () => console.log(`Listening on ${PORT}`));
 const io = socketIO(server);
-// const app = require('express')();
-// const http = require('http').createServer(app);
-// const io = require('socket.io')(http);
-// const path = require('path');
+
+let waiting = [];
+let mapping = {};
+const match = () => {
+    if (waiting.length < 2) {
+        return;
+    }
+    let o1 = waiting.pop();
+    let o2 = waiting.pop();
+    mapping[o1.id] = o2;
+    mapping[o2.id] = o1;
+    o1.socket.emit('message', {
+        text: o2.username + " is in the room!",
+        member: {
+            self: false,
+        }
+    })
+    o2.socket.emit('track', o1.track);
+    o2.socket.emit('message', {
+        text: o1.username + " is in the room!",
+        member: {
+            self: false,
+        }
+    })
+}
 
 io.on('connection', (socket) => {
-    console.log('connect');
+    socket.on('username', msg => {
+        const {username, track} = msg;
+        socket.username = username;
+        waiting.push({
+            id: socket.id, 
+            username: username, 
+            track: track, 
+            socket: socket
+        });
+        match(socket);
+        console.log(socket.username + " connects");
+    })
     socket.on('message', (message) => {
-        console.log(message);
-        socket.emit('message', message);
+        if (mapping[socket.id] !== undefined) {
+            let other = mapping[socket.id];
+            socket.to(other.id).emit('message', message);
+        }
     })
     socket.on('disconnect', () => {
-        console.log('disconnect');
+        console.log(socket.username + ' disconnects');
+        let other = mapping[socket.id];
+        if (other === undefined) {
+            waiting = waiting.filter(item => item.id !== socket.id);
+        } else {
+            socket.to(other.id).emit('message', {text: socket.username + " left", member: {self: false}});
+            delete mapping[socket.id];
+            delete mapping[other.id];
+            waiting.push(other);
+        }
+        match();
     });
 });
-
-setInterval(() => io.emit('time', new Date().toTimeString()), 1000);
-// let queue = [];
-// let number = 0;
-// let pair = new Map();
-
-// app.get('/', function(req, res) {
-//     res.sendFile(__dirname + "/index.html");
-// });
-
-// const match = () => {
-//     if (queue.length < 2) return false;
-//     let socket1 = queue.pop();
-//     let socket2 = queue.pop();
-//     pair.set(socket1.username, socket2);
-//     pair.set(socket2.username, socket1);
-//     // register socket listening
-//     socket1.on('chat message', (msg) => {
-//         console.log(msg);
-//         if (!pair.has(socket1.username)) return;
-//         socket2.emit("chat message", {
-//             username: socket1.username,
-//             msg: msg.msg,
-//         });
-//     });
-//     socket2.on('chat message', (msg) => {
-//         console.log(msg);
-//         if (!pair.has(socket2.username)) return;
-//         socket1.emit("chat message", {
-//             username: socket2.username,
-//             msg: msg.msg,
-//         });
-//     });
-//     socket1.emit('chat message', {
-//         username: socket2.username,
-//         msg: socket2.username + " is in the room",
-//     });
-//     socket2.emit('chat message', {
-//         username: socket1.username,
-//         msg: socket1.username + " is in the room",
-//     });
-//     // disconnect handler
-//     socket1.on('disconnect', () => {
-//         console.log(socket1.username + " has disconnected");
-//         if (!pair.has(socket1.username)) return;
-//         pair.delete(socket1.username);
-//         pair.delete(socket2.username);
-//     })
-//     socket2.on('disconnect', () => {
-//         console.log(socket2.username + " has disconnected");
-//         if (!pair.has(socket2.username)) return;
-//         pair.delete(socket1.username);
-//         pair.delete(socket2.username);
-//     })
-//     return true;
-// }
-
-// io.on('connection', (socket) => {
-//     socket.on('username', (username) => {
-//         number++;
-//         socket.username = username;
-//         queue.push(socket);
-//         console.log(username + "connects");
-//         socket.emit('chat message', {
-//             username: "admin",
-//             msg: "Welcome to the chat room!"
-//         });
-//         match();
-//         console.log(queue.length);
-//     })
-// });
-
-// http.listen(PORT, () => {
-//     console.log(`App listening on port ${PORT}`);
-// });
